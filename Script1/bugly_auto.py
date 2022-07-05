@@ -56,14 +56,20 @@ class MyFrame3(wx.Frame):
     # Virtual event handlers, override them in your derived class
     # 设置按钮事件
     def find_square(self, event):
-        global driver
+        global driver, tiplist
         for i in range(20):
+            t1 = time.strftime('%H:%M:%S', time.localtime(time.time()))
             if i == 20:
                 print("第20次重启失败网页异常,停止运行")
                 break
-            print("第%s次重启失败网页异常" % str(i))
+            tip1 = "第%s次重启失败网页异常" % str(i)
+            tiplist = []   # 定个时间列表，到点后把时间写入列表，判断下面的重启浏览器时间
+            if t1 >= '17:30:00':
+                tiplist.append(tip1)
+            print("第%s次重启失败网页异常" % str(i) + '\n')
+
             try:
-                address = self.m_textCtrl5.GetValue() # GetValue是为了获取输入的文本
+                address = self.m_textCtrl5.GetValue()  # GetValue是为了获取输入的文本
                 with open(address, encoding='utf-8') as file:  # 使用输入的文件地址获取邮箱等参数
                     self.content = file.readlines()  # 遍历文件内的每行，形成一个list
                     self.content = ''.join(self.content).strip('\n').splitlines()  # 删除字符串的\n
@@ -72,6 +78,9 @@ class MyFrame3(wx.Frame):
                 # 加载配置数据，进入网站无需登录
                 option = webdriver.ChromeOptions()
                 option.add_argument(profile_directory)
+                option.add_argument('--no-sandbox')
+                option.add_argument('--disable-gpu')  # 防止网页奔溃
+                option.add_argument('--ignore-certificate-errors')  # 忽略exe执行时的证书报错
                 driver = webdriver.Chrome(chrome_options=option)
 
                 url = self.content[1]  # GetValue是为了获取输入的文本
@@ -100,9 +109,15 @@ class MyFrame3(wx.Frame):
                     '//*[@id="root"]/div/div/div[2]/div/div[1]/div[1]/div[2]/ul/li[2]/div').click()
                 driver.implicitly_wait(20)
                 driver.find_element_by_xpath('//*[@id="root"]/div/div/div[2]/div/div[1]/div[2]/ul[2]/li').click()
-                time.sleep(10)
+                time.sleep(100)
                 print('通知系统启动中')
+
                 while True:
+                    t2 = time.strftime('%H:%M:%S', time.localtime(time.time()))  # 格式输出系统化时间
+                    if t2 >= '17:30:00' and len(tiplist) == 0:    # 到5点半重启一下防止浏览器崩溃
+                        print(t2 + "重启\n")
+                        break
+
                     # Android
                     time.sleep(10)
                     print("Android最新信息的上报时间：" +
@@ -120,12 +135,14 @@ class MyFrame3(wx.Frame):
                     print("Android" + status)
                     if (new_pattern != old_pattern) and (status == "状态变更"):  # 判断内容列表是否更新,去除更新的是已解决信息
                         self.send_email(rec=self.content[3])
+                        print('已发送邮件')
                     else:
                         now = datetime.datetime.now()
                         print(now, "Android尚无更新\n")
                     # 将当前最新消息的上报时间记录，跟刷新后最新消息的上报记录进行对比
                     old_pattern = driver.find_element_by_xpath(
                         '//*[@id="root"]/div/div/div[2]/div/div[2]/div/div[2]/ul[1]/li[4]/p').text
+
                     # ios
                     time.sleep(10)
                     element = driver.find_element_by_xpath('//*[@id="root"]/div/div/div[2]/div/div[1]/div[1]/div/div')
@@ -155,20 +172,23 @@ class MyFrame3(wx.Frame):
                     if (new_pattern_ios != old_pattern_ios) and (status == "状态变更") \
                             and (version.find(n_version) == 0) and (int(nu) >= 10):  # 判断内容列表是否更新,去除更新的是已解决信息
                         self.send_email(rec=self.content[5])
-                    elif (new_pattern_ios != old_pattern_ios) and (status != "状态变更"):
+                        print('已发送邮件')
+
+                    elif (new_pattern_ios != old_pattern_ios) and (status == "状态变更"):  # 判断非最新的报错,写入文件
                         file_name = r'C:\Users\msi\Documents\一周bugly崩溃id.txt'
-                        with open(file_name, 'r+', encoding='utf-8') as file2:
+                        with open(file_name, 'a+', encoding='utf-8') as file2:
                             lis = file2.readlines()
                             if self.error_title not in lis:
                                 file2.write(self.error_title + '\n')
                                 now = datetime.datetime.now()
                                 print('ios错误已写入文档：', now)
-                    else:
+                    else:                                      # 无新报错
                         now = datetime.datetime.now()
                         print(now, "ios尚无更新\n")
                     old_pattern_ios = driver.find_element_by_xpath(
                         '//*[@id="root"]/div/div/div[2]/div/div[2]/div/div[2]/ul[1]/li[4]/p').text
                     time.sleep(220)  # 220s后重新检测一次
+
                     # 返回安卓页面
                     ActionChains(driver).move_to_element(element).perform()
                     driver.implicitly_wait(20)
@@ -187,11 +207,11 @@ class MyFrame3(wx.Frame):
         fajianren = self.content[7]  # 发送人邮箱
         shoujianren = rec  # 收件人邮箱
         title = '信息内容'  # 邮件标题
-        new_pattern = '有新的错误信息，请注意\n' + self.error_title + '\n' + self.error  # 提取网页内容列表
+        new_pattern = '有新的错误信息，请注意\n' + self.error_title + '\n' + self.error + '\n'  # 提取网页内容列表
         context = new_pattern  # 邮件内容
         smtp = smtplib.SMTP_SSL(HOST, 465)  # 启用SSL发信, 端口一般是465
         res = smtp.login(user=fajianren,
-                         password=self.content[9])  # 登录验证，password是邮箱授权码而非密码，需要去网易邮箱手动开启
+                         password=self.content[9])  # 登录验证，password是邮箱授权码而非密码
         print('发送结果：', res)
         msg = '\n'.join(
             ['From: {}'.format(fajianren), 'To: {}'.format(shoujianren), 'Subject: {}'.format(title), '',
